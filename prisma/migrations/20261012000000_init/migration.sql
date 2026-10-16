@@ -302,3 +302,14 @@ ALTER TABLE "streaks"       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "reminders"     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "devices"       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "insights"      ENABLE ROW LEVEL SECURITY;
+
+-- Review fixes
+-- mood_logs.tags must never be NULL (Prisma cannot express NOT NULL on arrays)
+ALTER TABLE "mood_logs" ALTER COLUMN "tags" SET NOT NULL;
+
+-- More value checks
+ALTER TABLE "weight_logs" ADD CONSTRAINT "weight_logs_weight_kg_positive" CHECK ("weight_kg" > 0);
+ALTER TABLE "goals" ADD CONSTRAINT "goals_target_value_positive" CHECK ("target_value" > 0);
+ALTER TABLE "reminders" ADD CONSTRAINT "reminders_interval_min_positive" CHECK ("interval_min" IS NULL OR "interval_min" > 0);
+ALTER TABLE "profiles" ADD CONSTRAINT "profiles_height_cm_range" CHECK ("height_cm" IS NULL OR "height_cm" BETWEEN 50 AND 272);
+ALTER TABLE "profiles" ADD CONSTRAINT "profiles_target_weight_kg_positive" CHECK ("target_weight_kg" IS NULL OR "target_weight_kg" > 0);

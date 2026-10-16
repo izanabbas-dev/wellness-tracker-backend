@@ -1,6 +1,7 @@
 // Wellness Tracker - full database schema (11 tables)
 // Matches "Wellness Tracker - Database Design" v2.
-// After creating the migration, append migration_extra.sql to it (see instructions).
+// CHECK constraints, RLS and the auth.users FK live in hand-written SQL in the init migration.
+// Add new ones to future migrations by hand too.
 
 generator client {
   provider = "prisma-client-js"
@@ -60,7 +61,7 @@ enum DevicePlatform {
 // ---------- Models ----------
 
 model Profile {
-  // Same value as Supabase auth.users.id (FK to auth.users is added in migration_extra.sql)
+  // Same value as Supabase auth.users.id (FK to auth.users is added in the init migration SQL)
   id                  String    @id @db.Uuid
   // Optional: the row is created on the first API request, before onboarding is finished
   name                String?
