@@ -1,0 +1,253 @@
+// Wellness Tracker - full database schema (11 tables)
+// Matches "Wellness Tracker - Database Design" v2.
+// CHECK constraints, RLS and the auth.users FK live in hand-written SQL in the init migration.
+// Add new ones to future migrations by hand too.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // Supabase pooled connection (used by the API)
+  directUrl = env("DIRECT_URL")   // Supabase direct / session connection (used by migrations)
+}
+
+// ---------- Enums ----------
+
+enum Units {
+  metric
+  imperial
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum PlanType {
+  free
+  premium
+}
+
+enum LogSource {
+  manual
+  imported
+}
+
+enum Intensity {
+  low
+  medium
+  high
+}
+
+enum GoalMetric {
+  water
+  exercise
+  sleep
+}
+
+enum ReminderType {
+  water
+  bedtime
+  checkin
+}
+
+enum DevicePlatform {
+  ios
+  android
+}
+
+// ---------- Models ----------
+
+model Profile {
+  // Same value as Supabase auth.users.id (FK to auth.users is added in the init migration SQL)
+  id                  String    @id @db.Uuid
+  // Optional: the row is created on the first API request, before onboarding is finished
+  name                String?
+  birthYear           Int?      @map("birth_year")
+  heightCm            Decimal?  @map("height_cm") @db.Decimal(5, 1)
+  targetWeightKg      Decimal?  @map("target_weight_kg") @db.Decimal(5, 2)
+  units               Units     @default(metric)
+  timezone            String    @default("UTC") // IANA name, e.g. "Asia/Karachi"
+  avatarUrl           String?   @map("avatar_url")
+  role                UserRole  @default(user)
+  plan                PlanType  @default(free)
+  onboardingCompleted Boolean   @default(false) @map("onboarding_completed")
+  isDisabled          Boolean   @default(false) @map("is_disabled")
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz
+  stripeCustomerId    String?   @map("stripe_customer_id")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  waterLogs    WaterLog[]
+  exerciseLogs ExerciseLog[]
+  sleepLogs    SleepLog[]
+  moodLogs     MoodLog[]
+  weightLogs   WeightLog[]
+  goals        Goal[]
+  reminders    Reminder[]
+  devices      Device[]
+  insights     Insight[]
+
+  @@map("profiles")
+}
+
+model WaterLog {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  amountMl   Int       @map("amount_ml")
+  loggedAt   DateTime  @map("logged_at") @db.Timestamptz
+  source     LogSource @default(manual)
+  externalId String?   @map("external_id") // Apple Health / Health Connect record id
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+  // Stops the same imported record being saved twice. NULL external_id (manual entries) is never blocked.
+  @@unique([userId, source, externalId])
+  @@map("water_logs")
+}
+
+model ExerciseLog {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  activityType String   @map("activity_type") // must match a name in the MET list in code
+  durationMin Int       @map("duration_min")
+  intensity   Intensity
+  calories    Int?      // MET x weight_kg x hours, calculated by the API
+  notes       String?
+  loggedAt    DateTime  @map("logged_at") @db.Timestamptz
+  source      LogSource @default(manual)
+  externalId  String?   @map("external_id")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+  @@unique([userId, source, externalId])
+  @@map("exercise_logs")
+}
+
+model SleepLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  bedTime     DateTime @map("bed_time") @db.Timestamptz
+  wakeTime    DateTime @map("wake_time") @db.Timestamptz
+  durationMin Int      @map("duration_min") // calculated from bed_time and wake_time
+  quality     Int      @db.SmallInt // 1 to 5
+  date        DateTime @db.Date // wake-up day in the user's timezone
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("sleep_logs")
+}
+
+model MoodLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  mood      Int      @db.SmallInt // 1 = awful ... 5 = great
+  tags      String[] @default([]) // up to 5, checked by the API
+  note      String? // up to 500 characters, checked by the API
+  loggedAt  DateTime @map("logged_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+  @@map("mood_logs")
+}
+
+model WeightLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  weightKg  Decimal  @map("weight_kg") @db.Decimal(5, 2) // always kg
+  bmi       Decimal? @db.Decimal(4, 1) // calculated by the API using profiles.height_cm
+  loggedAt  DateTime @map("logged_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+  @@map("weight_logs")
+}
+
+model Goal {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String     @map("user_id") @db.Uuid
+  metric      GoalMetric
+  targetValue Decimal    @map("target_value") // water = ml, exercise = minutes, sleep = minutes
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  streak Streak?
+
+  // One goal per metric per user
+  @@unique([userId, metric])
+  @@map("goals")
+}
+
+model Streak {
+  goalId      String    @id @map("goal_id") @db.Uuid
+  current     Int       @default(0)
+  best        Int       @default(0)
+  lastMetDate DateTime? @map("last_met_date") @db.Date
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  goal Goal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@map("streaks")
+}
+
+model Reminder {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  type       ReminderType
+  timeOfDay  DateTime?    @map("time_of_day") @db.Time // local time of day
+  intervalMin Int?        @map("interval_min") // repeat every N minutes (water)
+  enabled    Boolean      @default(true)
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One setting per reminder type per user
+  @@unique([userId, type])
+  @@map("reminders")
+}
+
+model Device {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  pushToken  String         @unique @map("push_token")
+  platform   DevicePlatform
+  lastSeenAt DateTime       @default(now()) @map("last_seen_at") @db.Timestamptz
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("devices")
+}
+
+model Insight {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  weekStart DateTime @map("week_start") @db.Date // the Monday of the summarised week
+  summary   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One summary per user per week
+  @@unique([userId, weekStart])
+  @@map("insights")
+}
