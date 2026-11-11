@@ -15,3 +15,5 @@ app.use(healthRouter);
 app.use(meRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
+
+export default app;
